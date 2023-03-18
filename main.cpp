@@ -7,10 +7,13 @@
 #include <functional>
 #include <memory>
 #include <set>
+#include <chrono>
+
+#define PRINT_REPEAT(thing, x) ({for (auto i = 0; i < x; i++) { std::cout << thing; }})
 
 namespace utils {
     template<typename Iterator>
-    constexpr std::string_view slice(Iterator str, long index = 0, long amount = -1)  {
+    constexpr std::string_view slice(Iterator& str, long index = 0, long amount = -1)  {
         assert(index >= 0);
         assert(index + amount <= str.size());
         return {str.begin()+index, str.begin()+index+(amount >= 0 ? amount : str.size()-index)};
@@ -34,7 +37,7 @@ namespace utils {
 
 namespace lexer {
     struct Lexer {
-        std::string data;
+        std::string_view data;
         uint index = 0;
 
         explicit Lexer(std::string_view data): data(data) {}
@@ -62,12 +65,20 @@ namespace lexer {
     };
 }
 
+template <typename Func>
+std::chrono::duration<long, std::ratio<1, 1000000>> measureTime(Func f) {
+    auto start = std::chrono::high_resolution_clock::now();
+    f();
+    auto d = std::chrono::high_resolution_clock::now();
+    return std::chrono::duration_cast<std::chrono::microseconds>(d-start);
+}
+
 namespace regix {
     const std::set<char> invalidChars{'(', '[', '|', '?', '*', '+', '.', '^', ']', ')'};
 
     struct Regix {
         virtual long match(std::string_view source, std::vector<std::vector<std::string_view>>& matches) = 0;
-        // virtual void print(int offset = 0) = 0;
+        virtual void print(int offset = 0) = 0;
 
         bool doesMatch(std::string_view source) {
             std::vector<std::vector<std::string_view>> ms;
@@ -84,6 +95,11 @@ namespace regix {
             else
                 return -1;
         }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << "ANY" << std::endl;
+        }
     };
 
     struct Char: public Regix {
@@ -94,6 +110,11 @@ namespace regix {
         long match(std::string_view source, std::vector<std::vector<std::string_view>> &matches) override {
             return utils::isPeekChar(source, c) ? 1 : -1;
         }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << "CHAR(" << c << ')' << std::endl;
+        }
     };
 
     struct Numeric: public Regix {
@@ -101,6 +122,11 @@ namespace regix {
             return utils::isPeek(source, [](auto c){
                 return isdigit(c);
             }) ? 1 : -1;
+        }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << "DIGIT" << std::endl;
         }
     };
 
@@ -110,6 +136,11 @@ namespace regix {
                 return isspace(c);
             }) ? 1 : -1;
         }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << "WHITESPACE" << std::endl;
+        }
     };
 
     struct Letter: public Regix {
@@ -117,6 +148,11 @@ namespace regix {
             return utils::isPeek(source, [](auto c){
                 return isalpha(c);
             }) ? 1 : -1;
+        }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << "LETTER" << std::endl;
         }
     };
 
@@ -144,6 +180,12 @@ namespace regix {
                 src = utils::slice(src, res);
             }
         }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << amount << "..MORE" << std::endl;
+            inner->print(++offset);
+        }
     };
 
     struct Optional: public Regix {
@@ -157,6 +199,12 @@ namespace regix {
                 return 0;
             }
             return res;
+        }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << "OPTIONAL" << std::endl;
+            inner->print(++offset);
         }
     };
 
@@ -181,6 +229,14 @@ namespace regix {
             matches[id].push_back(utils::slice(source, 0, matchAmount));
             return matchAmount;
         }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << "CAPTURE" << std::endl;
+            for (auto const& in : inner) {
+                in->print(offset+1);
+            }
+        }
     };
 
     struct Group: public Regix {
@@ -203,13 +259,19 @@ namespace regix {
 
             return matchAmount;
         }
+
+        void print(int offset = 0) override {
+            for (auto const& in : inner) {
+                in->print(offset);
+            }
+        }
     };
 
     struct Or: public Regix {
         std::unique_ptr<Regix> right;
         std::unique_ptr<Regix> left;
 
-        explicit Or(std::unique_ptr<Regix> left, std::unique_ptr<Regix> right): left(std::move(left)), right(std::move(right)) {}
+        explicit Or(std::unique_ptr<Regix> left, std::unique_ptr<Regix> right): right(std::move(right)), left(std::move(left)) {}
 
         long match(std::string_view source, std::vector<std::vector<std::string_view>> &matches) override {
             auto res = left->match(source, matches);
@@ -218,6 +280,11 @@ namespace regix {
                 return right->match(source, matches);
             }
             return res;
+        }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << "OR" << std::endl;
         }
     };
 
@@ -228,6 +295,12 @@ namespace regix {
 
         long match(std::string_view source, std::vector<std::vector<std::string_view>> &matches) override {
             return inner->match(source, matches) < 0 ? 1 : -1;
+        }
+
+        void print(int offset = 0) override {
+            PRINT_REPEAT(' ', offset*2);
+            std::cout << "NOT" << std::endl;
+            inner->print(++offset);
         }
     };
 
@@ -261,7 +334,6 @@ namespace regix {
                 buf.push_back(std::make_unique<Char>(c));
             }
         }
-
         if (buf.empty()) return false;
 
         previous.push_back(std::make_unique<Group>(std::move(buf)));
@@ -321,6 +393,7 @@ namespace regix {
             }
             case '?': {
                 l.consume();
+
                 if (previous.empty()) {
                     return false;
                 }
@@ -347,6 +420,7 @@ namespace regix {
             }
             case '+': {
                 l.consume();
+
                 if (previous.empty()) {
                     return false;
                 }
@@ -379,7 +453,7 @@ namespace regix {
                 return true;
             }
             default:
-                parseSimpleRegix(l, previous);
+                return parseSimpleRegix(l, previous);
         }
     }
 
@@ -400,7 +474,14 @@ int main() {
 
     std::cout << "finished parsing" << std::endl;
 
-    auto res = reg->doesMatch("uwu");
+    // reg->print();
+
+    auto res = measureTime([&]() {
+        bool volatile x;
+        for (auto i = 0; i < 1'000'000; i++) {
+            x = reg->doesMatch("uwu");
+        }
+    });
     std::cout << res << std::endl;
 
     return 0;
