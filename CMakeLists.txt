@@ -4,4 +4,4 @@ project(Regix)
 set(CMAKE_CXX_STANDARD 23)
 set(CMAKE_CXX_FLAGS "-Wall")
 
-add_executable(Regix main.cpp)
+add_executable(Regix main.cpp Regix.h)
